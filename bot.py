@@ -115,126 +115,68 @@ async def download_image(url):
 
 
 async def create_welcome_card(member: discord.Member):
-    img = make_background()
-    draw = ImageDraw.Draw(img)
+    # 1. Load ảnh mẫu background rỗng đã chuẩn bị
+    try:
+        base_img = Image.open("welcome_template.png").convert("RGBA")
+    except FileNotFoundError:
+        # Dự phòng nếu quên chưa bỏ file ảnh nền vào thư mục
+        base_img = Image.new("RGBA", (1000, 600), (10, 10, 10, 255))
 
-    # Luxury frame
-    draw.rounded_rectangle(
-        (20, 20, CARD_WIDTH - 21, CARD_HEIGHT - 21),
-        radius=28,
-        outline=(175, 137, 62, 180),
-        width=2,
-    )
-    draw.rounded_rectangle(
-        (28, 28, CARD_WIDTH - 29, CARD_HEIGHT - 29),
-        radius=22,
-        outline=(88, 68, 35, 150),
-        width=1,
-    )
-
-    # Decorative gold corner details
-    for off in (0, 1):
-        draw.line((58 + off, 72, 120 + off, 72), fill=GOLD, width=2)
-        draw.line((58, 72 + off, 58, 134 + off), fill=GOLD, width=2)
-        draw.line((904 - off, 440, 966 - off, 440), fill=GOLD, width=2)
-        draw.line((966, 378 - off, 966, 440 - off), fill=GOLD, width=2)
-
-    # Small top label
-    draw_text_center(
-        draw,
-        (330, 48, 694, 102),
-        "ANH THU COMMUNITY",
-        font(FONT_BOLD, 22),
-        GOLD,
-    )
-
-    # Welcome title
-    draw_text_center(
-        draw,
-        (250, 92, 774, 190),
-        "WELCOME",
-        font(FONT_SERIF_BOLD, 70),
-        CREAM,
-    )
-
-    # Avatar
-    avatar_size = 170
-    avatar_x = 427
-    avatar_y = 168
-
+    # 2. Lấy Avatar người dùng & cắt thành hình tròn
+    avatar_size = 230  # Kích thước avatar khớp với khung tròn vàng
     try:
         avatar_url = member.display_avatar.replace(format="png", size=256).url
         avatar_bytes = await download_image(str(avatar_url))
-        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+        avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
     except Exception:
-        avatar = Image.new("RGBA", (avatar_size, avatar_size), (65, 65, 65, 255))
+        avatar_img = Image.new("RGBA", (avatar_size, avatar_size), (100, 100, 100, 255))
 
-    # Gold glow behind avatar
-    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    gg = ImageDraw.Draw(glow)
-    gg.ellipse(
-        (avatar_x - 13, avatar_y - 13, avatar_x + avatar_size + 13, avatar_y + avatar_size + 13),
-        outline=(238, 198, 104, 110),
-        width=10,
-    )
-    glow = glow.filter(ImageFilter.GaussianBlur(9))
-    img.alpha_composite(glow)
+    avatar_cropped = circle_crop(avatar_img, avatar_size)
 
-    draw = ImageDraw.Draw(img)
-    draw.ellipse(
-        (avatar_x - 7, avatar_y - 7, avatar_x + avatar_size + 7, avatar_y + avatar_size + 7),
-        fill=(5, 5, 6, 255),
-        outline=GOLD,
-        width=3,
-    )
-    img.alpha_composite(circle_crop(avatar, avatar_size), (avatar_x, avatar_y))
+    # 3. Chèn Avatar vào đúng vị trí khung tròn góc phải
+    # Tọa độ (X, Y) tâm khung tròn bên phải
+    avatar_x = 645 
+    avatar_y = 175
+    base_img.alpha_composite(avatar_cropped, (avatar_x, avatar_y))
 
-    # Username
-    username = member.display_name
-    if len(username) > 24:
-        username = username[:23] + "…"
+    draw = ImageDraw.Draw(base_img)
 
-    draw = ImageDraw.Draw(img)
+    # 4. Viết Username vào vị trí bên trái
+    username = f"@{member.display_name}"
+    if len(username) > 18:
+        username = username[:17] + "…"
+
+    # Tọa độ vùng chứa Tên người dùng
     draw_text_center(
         draw,
-        (120, 350, 904, 398),
+        (100, 290, 500, 350),
         username,
-        font(FONT_BOLD, 34),
+        font(FONT_BOLD, 36),
         WHITE,
     )
 
-    # Member count panel
-    panel = (350, 407, 674, 464)
-    draw.rounded_rectangle(
-        panel,
-        radius=18,
-        fill=PANEL,
-        outline=(155, 118, 54, 170),
-        width=1,
-    )
-    label = f"MEMBER  #{member.guild.member_count:,}"
+    # 5. Viết Số thứ tự thành viên (1,234)
+    member_count_str = f"{member.guild.member_count:,}"
     draw_text_center(
         draw,
-        panel,
-        label,
-        font(FONT_BOLD, 19),
+        (100, 390, 500, 450),
+        member_count_str,
+        font(FONT_BOLD, 42),
         GOLD_LIGHT,
     )
 
-    # Fine divider
-    draw.line((250, 332, 774, 332), fill=(151, 117, 55, 120), width=1)
-
-    # Bottom micro text
+    # 6. Viết Số lượng thành viên ở thanh công cụ phía dưới (MEMBER COUNT)
     draw_text_center(
         draw,
-        (310, 470, 714, 493),
-        "WELCOME TO THE COMMUNITY",
-        font(FONT_REG, 12),
-        (165, 150, 125, 255),
+        (470, 530, 560, 560),
+        member_count_str,
+        font(FONT_BOLD, 16),
+        WHITE,
     )
 
+    # Xuất file ảnh PNG gửi đi
     output = io.BytesIO()
-    img.convert("RGB").save(output, format="PNG", optimize=True)
+    base_img.convert("RGB").save(output, format="PNG", optimize=True)
     output.seek(0)
     return output
 
