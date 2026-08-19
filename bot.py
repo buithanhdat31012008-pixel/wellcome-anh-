@@ -115,17 +115,19 @@ async def download_image(url):
 
 
 async def create_welcome_card(member: discord.Member):
-    # 1. Load ảnh mẫu background rỗng đã chuẩn bị
     try:
         base_img = Image.open("welcome_template.png").convert("RGBA")
     except FileNotFoundError:
-        # Dự phòng nếu quên chưa bỏ file ảnh nền vào thư mục
-        base_img = Image.new("RGBA", (1000, 600), (10, 10, 10, 255))
+        base_img = Image.new("RGBA", (1000, 600), (15, 15, 15, 255))
 
-    # 2. Lấy Avatar người dùng & cắt thành hình tròn
-    avatar_size = 230  # Kích thước avatar khớp với khung tròn vàng
+    # Lấy tỷ lệ thực tế của file ảnh mẫu bạn tải lên
+    img_w, img_h = base_img.size
+
+    # 1. Avatar: Tăng kích thước lên 290px và căn chính giữa khung nguyệt quế bên phải
+    avatar_size = int(img_h * 0.38) # Tự động co giãn theo cỡ ảnh mẫu
+    
     try:
-        avatar_url = member.display_avatar.replace(format="png", size=256).url
+        avatar_url = member.display_avatar.replace(format="png", size=512).url
         avatar_bytes = await download_image(str(avatar_url))
         avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
     except Exception:
@@ -133,48 +135,46 @@ async def create_welcome_card(member: discord.Member):
 
     avatar_cropped = circle_crop(avatar_img, avatar_size)
 
-    # 3. Chèn Avatar vào đúng vị trí khung tròn góc phải
-    # Tọa độ (X, Y) tâm khung tròn bên phải
-    avatar_x = 645 
-    avatar_y = 175
+    # Tọa độ khung tròn vàng bên phải
+    avatar_x = int(img_w * 0.585) 
+    avatar_y = int(img_h * 0.280)
     base_img.alpha_composite(avatar_cropped, (avatar_x, avatar_y))
 
     draw = ImageDraw.Draw(base_img)
 
-    # 4. Viết Username vào vị trí bên trái
+    # 2. Tên Username: Viết to rõ dưới chữ WELCOME,
     username = f"@{member.display_name}"
-    if len(username) > 18:
-        username = username[:17] + "…"
+    if len(username) > 16:
+        username = username[:15] + "…"
 
-    # Tọa độ vùng chứa Tên người dùng
+    # Căn giữa vùng bên trái (dưới chữ WELCOME,)
     draw_text_center(
         draw,
-        (100, 290, 500, 350),
+        (int(img_w * 0.12), int(img_h * 0.500), int(img_w * 0.48), int(img_h * 0.570)),
         username,
-        font(FONT_BOLD, 36),
+        font(FONT_BOLD, int(img_h * 0.065)),  # Tăng cỡ chữ to rõ
         WHITE,
     )
 
-    # 5. Viết Số thứ tự thành viên (1,234)
+    # 3. Số thứ tự thành viên (Ví dụ: 1,234)
     member_count_str = f"{member.guild.member_count:,}"
     draw_text_center(
         draw,
-        (100, 390, 500, 450),
+        (int(img_w * 0.12), int(img_h * 0.630), int(img_w * 0.48), int(img_h * 0.720)),
         member_count_str,
-        font(FONT_BOLD, 42),
+        font(FONT_BOLD, int(img_h * 0.080)),  # Font chữ to nổi bật
         GOLD_LIGHT,
     )
 
-    # 6. Viết Số lượng thành viên ở thanh công cụ phía dưới (MEMBER COUNT)
+    # 4. Số lượng thành viên ở khung nhỏ phía dưới (MEMBER COUNT)
     draw_text_center(
         draw,
-        (470, 530, 560, 560),
+        (int(img_w * 0.44), int(img_h * 0.810), int(img_w * 0.55), int(img_h * 0.870)),
         member_count_str,
-        font(FONT_BOLD, 16),
+        font(FONT_BOLD, int(img_h * 0.028)),
         WHITE,
     )
 
-    # Xuất file ảnh PNG gửi đi
     output = io.BytesIO()
     base_img.convert("RGB").save(output, format="PNG", optimize=True)
     output.seek(0)
