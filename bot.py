@@ -313,14 +313,22 @@ async def on_message(message):
     
 @bot.command(name="testwelcome")
 async def testwelcome(ctx):
-    """Lệnh giả lập gửi ảnh welcome để kiểm tra"""
     try:
         await ctx.send("⏳ Đang tạo ảnh test welcome...")
-        # Gọi trực tiếp hàm on_member_join và lấy người dùng gõ lệnh làm mẫu
-        await on_member_join(ctx.author)
-        await ctx.send("✅ Đã chạy xong sự kiện test welcome!")
+        
+        # 1. Tạo ảnh card
+        card = await create_welcome_card(ctx.author)
+        
+        # 2. Gửi thẳng vào kênh vừa gõ lệnh (ctx.channel)
+        await ctx.send(
+            content=f"Chào mừng {ctx.author.mention} đến với ANH THU COMMUNITY!",
+            file=discord.File(card, filename="welcome.png")
+        )
+        await ctx.send("✅ Đã tạo ảnh thành công!")
+        
     except Exception as e:
-        await ctx.send(f"❌ Có lỗi xảy ra khi test: {e}")
+        # Nếu vẽ ảnh lỗi (thiếu file nền, sai font...), lỗi sẽ báo ngay ra Discord
+        await ctx.send(f"❌ Lỗi khi tạo ảnh: `{e}`")
 
 async def main():
     await start_web_server()
