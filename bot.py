@@ -31,10 +31,10 @@ WHITE = (255, 255, 255, 255)
 BLACK = (7, 7, 8, 255)
 PANEL = (15, 14, 13, 235)
 
-FONT_REG = "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
-FONT_BOLD = "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
-FONT_SERIF = "/usr/share/fonts/truetype/freefont/FreeSerif.ttf"
-FONT_SERIF_BOLD = "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf"
+FONT_REG = "FreeSans.ttf"
+FONT_BOLD = "FreeSansBold.ttf"
+FONT_SERIF = "FreeSerif.ttf"
+FONT_SERIF_BOLD = "FreeSerifBold.ttf"
 
 if not TOKEN:
     raise RuntimeError("Thieu bien moi truong DISCORD_TOKEN")
@@ -44,7 +44,11 @@ if WELCOME_CHANNEL_ID == 0:
 
 
 def font(path, size):
-    return ImageFont.truetype(path, size)
+    try:
+        return ImageFont.truetype(path, size)
+    except OSError:
+        # Nếu không tìm thấy file font, tự động dùng font mặc định của Pillow
+        return ImageFont.load_default()
 
 
 def rounded_mask(size, radius):
