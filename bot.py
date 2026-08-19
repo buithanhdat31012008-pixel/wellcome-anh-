@@ -310,7 +310,17 @@ async def on_message(message):
                 print(f"Loi gui anh: {e}")
 
     await bot.process_commands(message)
-
+    
+@bot.command(name="testwelcome")
+async def testwelcome(ctx):
+    """Lệnh giả lập gửi ảnh welcome để kiểm tra"""
+    try:
+        await ctx.send("⏳ Đang tạo ảnh test welcome...")
+        # Gọi trực tiếp hàm on_member_join và lấy người dùng gõ lệnh làm mẫu
+        await on_member_join(ctx.author)
+        await ctx.send("✅ Đã chạy xong sự kiện test welcome!")
+    except Exception as e:
+        await ctx.send(f"❌ Có lỗi xảy ra khi test: {e}")
 
 async def main():
     await start_web_server()
