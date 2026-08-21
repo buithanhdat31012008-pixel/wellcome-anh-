@@ -6,6 +6,22 @@ from aiohttp import web, ClientSession
 import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import yt_dlp
+
+YTDL_OPTIONS = {
+    'format': 'bestaudio/best',
+    'extractflat': False,
+    'noplaylist': True,
+    'quiet': True,
+    'default_search': 'scsearch',
+}
+
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn',
+}
+
+ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 PORT = int(os.getenv("PORT", "10000"))
@@ -31,10 +47,10 @@ WHITE = (255, 255, 255, 255)
 BLACK = (7, 7, 8, 255)
 PANEL = (15, 14, 13, 235)
 
-FONT_REG = "FreeSans.ttf"
-FONT_BOLD = "FreeSansBold.ttf"
-FONT_SERIF = "FreeSerif.ttf"
-FONT_SERIF_BOLD = "FreeSerifBold.ttf"
+FONT_REG = "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+FONT_BOLD = "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
+FONT_SERIF = "/usr/share/fonts/truetype/freefont/FreeSerif.ttf"
+FONT_SERIF_BOLD = "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf"
 
 if not TOKEN:
     raise RuntimeError("Thieu bien moi truong DISCORD_TOKEN")
@@ -44,11 +60,7 @@ if WELCOME_CHANNEL_ID == 0:
 
 
 def font(path, size):
-    try:
-        return ImageFont.truetype(path, size)
-    except OSError:
-        # Nếu không tìm thấy file font, tự động dùng font mặc định của Pillow
-        return ImageFont.load_default()
+    return ImageFont.truetype(path, size)
 
 
 def rounded_mask(size, radius):
@@ -115,68 +127,126 @@ async def download_image(url):
 
 
 async def create_welcome_card(member: discord.Member):
-    try:
-        base_img = Image.open("welcome_template.png").convert("RGBA")
-    except FileNotFoundError:
-        base_img = Image.new("RGBA", (1000, 600), (15, 15, 15, 255))
+    img = make_background()
+    draw = ImageDraw.Draw(img)
 
-    # Lấy tỷ lệ thực tế của file ảnh mẫu bạn tải lên
-    img_w, img_h = base_img.size
+    # Luxury frame
+    draw.rounded_rectangle(
+        (20, 20, CARD_WIDTH - 21, CARD_HEIGHT - 21),
+        radius=28,
+        outline=(175, 137, 62, 180),
+        width=2,
+    )
+    draw.rounded_rectangle(
+        (28, 28, CARD_WIDTH - 29, CARD_HEIGHT - 29),
+        radius=22,
+        outline=(88, 68, 35, 150),
+        width=1,
+    )
 
-    # 1. Avatar: Tăng kích thước lên 290px và căn chính giữa khung nguyệt quế bên phải
-    avatar_size = int(img_h * 0.38) # Tự động co giãn theo cỡ ảnh mẫu
-    
-    try:
-        avatar_url = member.display_avatar.replace(format="png", size=512).url
-        avatar_bytes = await download_image(str(avatar_url))
-        avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
-    except Exception:
-        avatar_img = Image.new("RGBA", (avatar_size, avatar_size), (100, 100, 100, 255))
+    # Decorative gold corner details
+    for off in (0, 1):
+        draw.line((58 + off, 72, 120 + off, 72), fill=GOLD, width=2)
+        draw.line((58, 72 + off, 58, 134 + off), fill=GOLD, width=2)
+        draw.line((904 - off, 440, 966 - off, 440), fill=GOLD, width=2)
+        draw.line((966, 378 - off, 966, 440 - off), fill=GOLD, width=2)
 
-    avatar_cropped = circle_crop(avatar_img, avatar_size)
-
-    # Tọa độ khung tròn vàng bên phải
-    avatar_x = int(img_w * 0.585) 
-    avatar_y = int(img_h * 0.280)
-    base_img.alpha_composite(avatar_cropped, (avatar_x, avatar_y))
-
-    draw = ImageDraw.Draw(base_img)
-
-    # 2. Tên Username: Viết to rõ dưới chữ WELCOME,
-    username = f"@{member.display_name}"
-    if len(username) > 16:
-        username = username[:15] + "…"
-
-    # Căn giữa vùng bên trái (dưới chữ WELCOME,)
+    # Small top label
     draw_text_center(
         draw,
-        (int(img_w * 0.12), int(img_h * 0.500), int(img_w * 0.48), int(img_h * 0.570)),
+        (330, 48, 694, 102),
+        "ANH THU COMMUNITY",
+        font(FONT_BOLD, 22),
+        GOLD,
+    )
+
+    # Welcome title
+    draw_text_center(
+        draw,
+        (250, 92, 774, 190),
+        "WELCOME",
+        font(FONT_SERIF_BOLD, 70),
+        CREAM,
+    )
+
+    # Avatar
+    avatar_size = 170
+    avatar_x = 427
+    avatar_y = 168
+
+    try:
+        avatar_url = member.display_avatar.replace(format="png", size=256).url
+        avatar_bytes = await download_image(str(avatar_url))
+        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+    except Exception:
+        avatar = Image.new("RGBA", (avatar_size, avatar_size), (65, 65, 65, 255))
+
+    # Gold glow behind avatar
+    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    gg = ImageDraw.Draw(glow)
+    gg.ellipse(
+        (avatar_x - 13, avatar_y - 13, avatar_x + avatar_size + 13, avatar_y + avatar_size + 13),
+        outline=(238, 198, 104, 110),
+        width=10,
+    )
+    glow = glow.filter(ImageFilter.GaussianBlur(9))
+    img.alpha_composite(glow)
+
+    draw = ImageDraw.Draw(img)
+    draw.ellipse(
+        (avatar_x - 7, avatar_y - 7, avatar_x + avatar_size + 7, avatar_y + avatar_size + 7),
+        fill=(5, 5, 6, 255),
+        outline=GOLD,
+        width=3,
+    )
+    img.alpha_composite(circle_crop(avatar, avatar_size), (avatar_x, avatar_y))
+
+    # Username
+    username = member.display_name
+    if len(username) > 24:
+        username = username[:23] + "…"
+
+    draw = ImageDraw.Draw(img)
+    draw_text_center(
+        draw,
+        (120, 350, 904, 398),
         username,
-        font(FONT_BOLD, int(img_h * 0.065)),  # Tăng cỡ chữ to rõ
+        font(FONT_BOLD, 34),
         WHITE,
     )
 
-    # 3. Số thứ tự thành viên (Ví dụ: 1,234)
-    member_count_str = f"{member.guild.member_count:,}"
+    # Member count panel
+    panel = (350, 407, 674, 464)
+    draw.rounded_rectangle(
+        panel,
+        radius=18,
+        fill=PANEL,
+        outline=(155, 118, 54, 170),
+        width=1,
+    )
+    label = f"MEMBER  #{member.guild.member_count:,}"
     draw_text_center(
         draw,
-        (int(img_w * 0.12), int(img_h * 0.630), int(img_w * 0.48), int(img_h * 0.720)),
-        member_count_str,
-        font(FONT_BOLD, int(img_h * 0.080)),  # Font chữ to nổi bật
+        panel,
+        label,
+        font(FONT_BOLD, 19),
         GOLD_LIGHT,
     )
 
-    # 4. Số lượng thành viên ở khung nhỏ phía dưới (MEMBER COUNT)
+    # Fine divider
+    draw.line((250, 332, 774, 332), fill=(151, 117, 55, 120), width=1)
+
+    # Bottom micro text
     draw_text_center(
         draw,
-        (int(img_w * 0.44), int(img_h * 0.810), int(img_w * 0.55), int(img_h * 0.870)),
-        member_count_str,
-        font(FONT_BOLD, int(img_h * 0.028)),
-        WHITE,
+        (310, 470, 714, 493),
+        "WELCOME TO THE COMMUNITY",
+        font(FONT_REG, 12),
+        (165, 150, 125, 255),
     )
 
     output = io.BytesIO()
-    base_img.convert("RGB").save(output, format="PNG", optimize=True)
+    img.convert("RGB").save(output, format="PNG", optimize=True)
     output.seek(0)
     return output
 
@@ -256,25 +326,51 @@ async def on_message(message):
                 print(f"Loi gui anh: {e}")
 
     await bot.process_commands(message)
-    
-@bot.command(name="testwelcome")
-async def testwelcome(ctx):
-    try:
-        await ctx.send("⏳ Đang tạo ảnh test welcome...")
-        
-        # 1. Tạo ảnh card
-        card = await create_welcome_card(ctx.author)
-        
-        # 2. Gửi thẳng vào kênh vừa gõ lệnh (ctx.channel)
-        await ctx.send(
-            content=f"Chào mừng {ctx.author.mention} đến với ANH THU COMMUNITY!",
-            file=discord.File(card, filename="welcome.png")
-        )
-        await ctx.send("✅ Đã tạo ảnh thành công!")
-        
-    except Exception as e:
-        # Nếu vẽ ảnh lỗi (thiếu file nền, sai font...), lỗi sẽ báo ngay ra Discord
-        await ctx.send(f"❌ Lỗi khi tạo ảnh: `{e}`")
+
+@bot.command(name='play')
+async def play(ctx, *, query: str):
+    if not ctx.author.voice:
+        return await ctx.send("❌ Bạn cần tham gia một Voice Channel trước!")
+
+    channel = ctx.author.voice.channel
+
+    if ctx.voice_client is None:
+        await channel.connect()
+    elif ctx.voice_client.channel != channel:
+        await ctx.voice_client.move_to(channel)
+
+    async with ctx.typing():
+        try:
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
+
+            if 'entries' in data and len(data['entries']) > 0:
+                data = data['entries'][0]
+
+            stream_url = data['url']
+            title = data.get('title', 'Bài hát SoundCloud')
+
+            source = discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)
+            
+            if ctx.voice_client.is_playing():
+                ctx.voice_client.stop()
+
+            ctx.voice_client.play(source, after=lambda e: print(f'Lỗi khi phát: {e}') if e else None)
+
+            await ctx.send(f"🎵 **Đang phát:** {title}\n🔗 <{data.get('webpage_url', query)}>")
+
+        except Exception as e:
+            print(f"Lỗi SoundCloud: {e}")
+            await ctx.send("❌ Đã xảy ra lỗi khi tải bài hát từ SoundCloud!")
+
+@bot.command(name='stop')
+async def stop(ctx):
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("🛑 Đã ngắt kết nối voice!")
+    else:
+        await ctx.send("Bot chưa vào kênh thoại nào.")
+
 
 async def main():
     await start_web_server()
