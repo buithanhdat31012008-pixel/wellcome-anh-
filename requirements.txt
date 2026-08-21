@@ -3,3 +3,4 @@ aiohttp>=3.10,<4
 Pillow>=10.0,<12
 yt-dlp
 PyNaCl
+static-ffmpeg
