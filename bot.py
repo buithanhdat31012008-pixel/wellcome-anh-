@@ -329,16 +329,22 @@ async def on_message(message):
 
 @bot.command(name='play')
 async def play(ctx, *, query: str):
+    # 1. Kiểm tra xem người dùng đã vào Voice Channel chưa
     if not ctx.author.voice:
         return await ctx.send("❌ Bạn cần tham gia một Voice Channel trước!")
 
     channel = ctx.author.voice.channel
 
-    if ctx.voice_client is None:
-        await channel.connect()
-    elif ctx.voice_client.channel != channel:
-        await ctx.voice_client.move_to(channel)
+    # 2. Kết nối vào kênh thoại NGAY LẬP TỨC
+    try:
+        if ctx.voice_client is None:
+            await channel.connect()
+        elif ctx.voice_client.channel != channel:
+            await ctx.voice_client.move_to(channel)
+    except Exception as e:
+        return await ctx.send(f"❌ Không thể vào Voice Channel: `{e}`")
 
+    # 3. Tìm kiếm và phát nhạc
     async with ctx.typing():
         try:
             loop = asyncio.get_event_loop()
@@ -355,14 +361,14 @@ async def play(ctx, *, query: str):
             if ctx.voice_client.is_playing():
                 ctx.voice_client.stop()
 
-            ctx.voice_client.play(source, after=lambda e: print(f'Lỗi khi phát: {e}') if e else None)
+            ctx.voice_client.play(source, after=lambda e: print(f'Lỗi khi phát xong: {e}') if e else None)
 
             await ctx.send(f"🎵 **Đang phát:** {title}\n🔗 <{data.get('webpage_url', query)}>")
 
         except Exception as e:
-            print(f"Lỗi SoundCloud: {e}")
-            await ctx.send("❌ Đã xảy ra lỗi khi tải bài hát từ SoundCloud!")
-
+            print(f"Lỗi chi tiết: {e}")
+            await ctx.send(f"❌ Lỗi khi tải nhạc: `{e}`")
+            
 @bot.command(name='stop')
 async def stop(ctx):
     if ctx.voice_client:
