@@ -329,25 +329,38 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# ================= HỆ THỐNG PHÁT NHẠC VÀ AUTOPLAY TỰ ĐỘNG =================
+# ================= HỆ THỐNG PHÁT NHẠC VÀ AUTOPLAY NGẪU NHIÊN =================
+import random
+
 song_queue = []
+played_history = set()  # Lưu danh sách ID/URL bài đã phát để chống trùng
 last_title = None
+
+# Danh sách từ khóa ngẫu nhiên dự phòng khi hết gợi ý
+GENRE_KEYWORDS = ["remix hot tiktok", "lofi chill viet", "edm viet mix", "nhac tre remix", "vinahouse"]
 
 async def play_next(ctx):
     global last_title
     
     if not ctx.voice_client or not ctx.voice_client.is_connected():
         song_queue.clear()
+        played_history.clear()
         last_title = None
         return
 
-    # 1. Hết hàng chờ -> Tự tìm bài hát tương tự trên SoundCloud qua Search
-    if len(song_queue) == 0 and last_title:
-        await ctx.send(f"📻 *Tự động tìm bài hát tương tự với:* **{last_title}**...")
+    # 1. Hết hàng chờ -> Tự tìm bài ngẫu nhiên mới trên SoundCloud
+    if len(song_queue) == 0:
+        await ctx.send("📻 *Đang tự động tìm bài hát ngẫu nhiên mới...*")
         try:
             loop = asyncio.get_event_loop()
-            # Lấy từ đầu tiên (tên nghệ sĩ/tên bài) để tìm các bài liên quan
-            search_query = f"scsearch5:{last_title.split('-')[0].strip()}"
+            
+            # Trích xuất từ khóa: Lấy tên nghệ sĩ hoặc dùng từ khóa thể loại ngẫu nhiên
+            if last_title and " - " in last_title:
+                artist = last_title.split(" - ")[0].strip()
+                search_query = f"scsearch20:{artist}"
+            else:
+                kw = random.choice(GENRE_KEYWORDS)
+                search_query = f"scsearch20:{kw}"
             
             search_result = await loop.run_in_executor(
                 None, 
@@ -355,10 +368,17 @@ async def play_next(ctx):
             )
 
             if 'entries' in search_result and len(search_result['entries']) > 0:
-                # Chọn ngẫu nhiên 1 bài trong 5 bài tìm thấy để danh sách không bị trùng
-                import random
-                track = random.choice(search_result['entries'])
-                track_url = track.get('webpage_url') or track.get('url')
+                # Lọc ra các bài chưa từng phát trong phiên này
+                unplayed_tracks = [
+                    t for t in search_result['entries'] 
+                    if t.get('webpage_url') not in played_history and t.get('url') not in played_history
+                ]
+                
+                # Nếu tất cả đã phát rồi thì chọn đại trong danh sách tìm kiếm
+                candidates = unplayed_tracks if unplayed_tracks else search_result['entries']
+                selected_track = random.choice(candidates)
+                
+                track_url = selected_track.get('webpage_url') or selected_track.get('url')
                 if track_url:
                     song_queue.append({'query': track_url})
         except Exception as e:
@@ -376,8 +396,10 @@ async def play_next(ctx):
 
             stream_url = data['url']
             title = data.get('title', 'Bài hát SoundCloud')
+            webpage_url = data.get('webpage_url', next_song['query'])
             
-            # Lưu tên bài hiện tại làm từ khóa tìm bài tiếp theo
+            # Ghi nhớ bài này đã phát
+            played_history.add(webpage_url)
             last_title = title
 
             source = discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)
@@ -414,7 +436,6 @@ async def play(ctx, *, query: str):
     except Exception as e:
         return await ctx.send(f"❌ Không thể vào Voice Channel: `{e}`")
 
-    # Nếu truyền link SoundCloud hoặc tên bài hát
     if not query.startswith("http"):
         query = f"scsearch:{query}"
 
@@ -437,6 +458,7 @@ async def skip(ctx):
 async def stop(ctx):
     global song_queue, last_title
     song_queue.clear()
+    played_history.clear()
     last_title = None
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
