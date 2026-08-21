@@ -329,38 +329,42 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# ================= HỆ THỐNG PHÁT NHẠC ỔN ĐỊNH =================
+# ================= HỆ THỐNG PHÁT NHẠC VÀ AUTOPLAY TỰ ĐỘNG =================
 song_queue = []
-last_played_url = None
+last_title = None
 
 async def play_next(ctx):
-    global last_played_url
+    global last_title
     
-    # Kiểm tra xem bot còn ở trong voice không, nếu mất kết nối thì dừng
     if not ctx.voice_client or not ctx.voice_client.is_connected():
         song_queue.clear()
-        last_played_url = None
+        last_title = None
         return
 
-    # 1. Tự động tìm bài liên quan nếu hết hàng chờ
-    if len(song_queue) == 0 and last_played_url:
+    # 1. Hết hàng chờ -> Tự tìm bài hát tương tự trên SoundCloud qua Search
+    if len(song_queue) == 0 and last_title:
+        await ctx.send(f"📻 *Tự động tìm bài hát tương tự với:* **{last_title}**...")
         try:
             loop = asyncio.get_event_loop()
-            related_data = await loop.run_in_executor(
+            # Lấy từ đầu tiên (tên nghệ sĩ/tên bài) để tìm các bài liên quan
+            search_query = f"scsearch5:{last_title.split('-')[0].strip()}"
+            
+            search_result = await loop.run_in_executor(
                 None, 
-                lambda: ytdl.extract_info(last_played_url, download=False)
+                lambda: ytdl.extract_info(search_query, download=False)
             )
-            related_tracks = related_data.get('related_tracks') or related_data.get('entries')
-            if related_tracks:
-                for track in related_tracks:
-                    track_url = track.get('url') or track.get('webpage_url')
-                    if track_url:
-                        song_queue.append({'query': track_url})
-                        break
-        except Exception as e:
-            print(f"Lỗi Autoplay nền: {e}")
 
-    # 2. Phát bài tiếp theo trong hàng chờ
+            if 'entries' in search_result and len(search_result['entries']) > 0:
+                # Chọn ngẫu nhiên 1 bài trong 5 bài tìm thấy để danh sách không bị trùng
+                import random
+                track = random.choice(search_result['entries'])
+                track_url = track.get('webpage_url') or track.get('url')
+                if track_url:
+                    song_queue.append({'query': track_url})
+        except Exception as e:
+            print(f"Lỗi Autoplay SoundCloud: {e}")
+
+    # 2. Tiến hành phát bài hát
     if len(song_queue) > 0:
         next_song = song_queue.pop(0)
         try:
@@ -372,17 +376,18 @@ async def play_next(ctx):
 
             stream_url = data['url']
             title = data.get('title', 'Bài hát SoundCloud')
-            last_played_url = data.get('webpage_url', next_song['query'])
+            
+            # Lưu tên bài hiện tại làm từ khóa tìm bài tiếp theo
+            last_title = title
 
             source = discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)
             
             if ctx.voice_client.is_playing():
                 ctx.voice_client.stop()
 
-            # Dùng try-except bọc sự kiện after để tránh sập luồng threadsafe
             def after_playing(error):
                 if error:
-                    print(f"Lỗi audio player: {error}")
+                    print(f"Lỗi audio: {error}")
                 asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
 
             ctx.voice_client.play(source, after=after_playing)
@@ -390,10 +395,9 @@ async def play_next(ctx):
 
         except Exception as e:
             print(f"Lỗi tải bài: {e}")
-            # Nếu bài này lỗi, tự động gọi bài tiếp theo để tránh kẹt bot
             await play_next(ctx)
     else:
-        await ctx.send("✅ Hết hàng chờ và không tìm thấy bài gợi ý. Bot tạm nghỉ!")
+        await ctx.send("✅ Không tìm thấy thêm nhạc gợi ý. Bot dừng phát!")
 
 @bot.command(name='play')
 async def play(ctx, *, query: str):
@@ -409,6 +413,10 @@ async def play(ctx, *, query: str):
             await ctx.voice_client.move_to(channel)
     except Exception as e:
         return await ctx.send(f"❌ Không thể vào Voice Channel: `{e}`")
+
+    # Nếu truyền link SoundCloud hoặc tên bài hát
+    if not query.startswith("http"):
+        query = f"scsearch:{query}"
 
     song_queue.append({'query': query})
 
@@ -427,15 +435,15 @@ async def skip(ctx):
 
 @bot.command(name='stop')
 async def stop(ctx):
-    global song_queue, last_played_url
+    global song_queue, last_title
     song_queue.clear()
-    last_played_url = None
+    last_title = None
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
         await ctx.send("🛑 Đã dừng phát nhạc và rời kênh!")
     else:
         await ctx.send("Bot chưa vào kênh thoại nào.")
-# =============================================================
+# ==============================================================================
 
 async def main():
     await start_web_server()
