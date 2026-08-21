@@ -2,6 +2,8 @@
 import io
 import os
 import asyncio
+import static_ffmpeg
+static_ffmpeg.add_paths()
 from aiohttp import web, ClientSession
 import discord
 from discord.ext import commands
