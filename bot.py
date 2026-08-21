@@ -329,7 +329,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# ================= HỆ THỐNG PHÁT NHẠC KHÔNG DELAY (PRE-LOADING) =================
+# ================= HỆ THỐNG PHÁT NHẠC 24/7 CHỐNG DISCONNECT =================
 import random
 
 song_queue = []
@@ -339,15 +339,11 @@ last_title = None
 GENRE_KEYWORDS = ["remix hot tiktok", "lofi chill viet", "edm viet mix", "nhac tre remix", "vinahouse"]
 
 async def fetch_track_info(query):
-    """Hàm tải thông tin bài hát chạy ngầm"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
 
 async def prepare_next_song():
-    """TẢI TRƯỚC BÀI KẾ TIẾP ĐỂ KHÔNG BỊ DELAY"""
     global last_title
-    
-    # 1. Nếu hàng chờ trống -> Tự tìm bài ngẫu nhiên mới và cho vào hàng chờ
     if len(song_queue) == 0:
         try:
             if last_title and " - " in last_title:
@@ -359,7 +355,7 @@ async def prepare_next_song():
             
             search_result = await fetch_track_info(search_query)
 
-            if 'entries' in search_result and len(search_result['entries']) > 0:
+            if search_result and 'entries' in search_result and len(search_result['entries']) > 0:
                 unplayed_tracks = [
                     t for t in search_result['entries'] 
                     if t.get('webpage_url') not in played_history and t.get('url') not in played_history
@@ -373,11 +369,10 @@ async def prepare_next_song():
         except Exception as e:
             print(f"Lỗi chuẩn bị nhạc trước: {e}")
 
-    # 2. Bóc tách sẵn Stream URL cho bài đầu hàng chờ (Pre-fetch data)
     if len(song_queue) > 0 and song_queue[0].get('data') is None:
         try:
             data = await fetch_track_info(song_queue[0]['query'])
-            if 'entries' in data and len(data['entries']) > 0:
+            if data and 'entries' in data and len(data['entries']) > 0:
                 data = data['entries'][0]
             song_queue[0]['data'] = data
         except Exception as e:
@@ -386,10 +381,16 @@ async def prepare_next_song():
 async def play_next(ctx):
     global last_title
     
+    # Kiểm tra nếu mất kết nối thì thử vào lại thay vì để ngắt hẳn
     if not ctx.voice_client or not ctx.voice_client.is_connected():
-        return
+        if ctx.author.voice:
+            try:
+                await ctx.author.voice.channel.connect(reconnect=True, timeout=60.0)
+            except Exception:
+                return
+        else:
+            return
 
-    # Nếu bài trong hàng chờ chưa được tải trước, tiến hành tải nhanh
     if len(song_queue) == 0 or song_queue[0].get('data') is None:
         await prepare_next_song()
 
@@ -398,7 +399,6 @@ async def play_next(ctx):
         data = next_song.get('data')
 
         if not data:
-            # Dự phòng nếu tải trước thất bại
             await play_next(ctx)
             return
 
@@ -410,25 +410,29 @@ async def play_next(ctx):
             played_history.add(webpage_url)
             last_title = title
 
-            source = discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)
+            # Tối ưu FFMPEGReconnect để không bị đứt luồng phát giữa chừng
+            ffmpeg_options_live = FFMPEG_OPTIONS.copy() if 'FFMPEG_OPTIONS' in globals() else {}
+            ffmpeg_options_live['before_options'] = '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
+
+            source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options_live)
             
             if ctx.voice_client.is_playing():
                 ctx.voice_client.stop()
 
             def after_playing(error):
                 if error:
-                    print(f"Lỗi audio: {error}")
+                    print(f"Lỗi audio player: {error}")
+                # Kích hoạt bài tiếp theo liên tục
                 asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
 
-            # Phát nhạc NGAY LẬP TỨC
             ctx.voice_client.play(source, after=after_playing)
             await ctx.send(f"🎵 **Đang phát:** {title}")
 
-            # TRONG LÚC BÀI NÀY ĐANG PHÁT -> KÍCH HOẠT TẢI SẴN BÀI TIẾP THEO
+            # Kích hoạt tải bài tiếp theo ngay trong nền
             asyncio.create_task(prepare_next_song())
 
         except Exception as e:
-            print(f"Lỗi phát bài: {e}")
+            print(f"Lỗi phát nhạc: {e}")
             await play_next(ctx)
 
 @bot.command(name='play')
@@ -453,7 +457,6 @@ async def play(ctx, *, query: str):
 
     if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
         await ctx.send(f"📥 Đã thêm vào hàng chờ (Vị trí #{len(song_queue)})")
-        # Tải sẵn thông tin ngầm nếu bài vừa thêm nằm ngay đầu hàng chờ
         asyncio.create_task(prepare_next_song())
     else:
         await play_next(ctx)
@@ -474,7 +477,7 @@ async def stop(ctx):
     last_title = None
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
-    await ctx.send("🛑 Đã xóa danh sách phát. Bot vẫn ở lại kênh thoại!")
+    await ctx.send("🛑 Đã dừng phát nhạc!")
 
 @bot.command(name='leave')
 async def leave(ctx):
