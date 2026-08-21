@@ -329,32 +329,27 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# ================= HỆ THỐNG PHÁT NHẠC VÀ AUTOPLAY NGẪU NHIÊN =================
+# ================= HỆ THỐNG PHÁT NHẠC 24/7 VÀ AUTOPLAY =================
 import random
 
 song_queue = []
-played_history = set()  # Lưu danh sách ID/URL bài đã phát để chống trùng
+played_history = set()
 last_title = None
 
-# Danh sách từ khóa ngẫu nhiên dự phòng khi hết gợi ý
 GENRE_KEYWORDS = ["remix hot tiktok", "lofi chill viet", "edm viet mix", "nhac tre remix", "vinahouse"]
 
 async def play_next(ctx):
     global last_title
     
+    # Nếu bot mất kết nối khỏi voice, dừng xử lý queue
     if not ctx.voice_client or not ctx.voice_client.is_connected():
-        song_queue.clear()
-        played_history.clear()
-        last_title = None
         return
 
-    # 1. Hết hàng chờ -> Tự tìm bài ngẫu nhiên mới trên SoundCloud
+    # 1. Hết hàng chờ -> Tự tìm bài ngẫu nhiên mới
     if len(song_queue) == 0:
-        await ctx.send("📻 *Đang tự động tìm bài hát ngẫu nhiên mới...*")
         try:
             loop = asyncio.get_event_loop()
             
-            # Trích xuất từ khóa: Lấy tên nghệ sĩ hoặc dùng từ khóa thể loại ngẫu nhiên
             if last_title and " - " in last_title:
                 artist = last_title.split(" - ")[0].strip()
                 search_query = f"scsearch20:{artist}"
@@ -368,13 +363,11 @@ async def play_next(ctx):
             )
 
             if 'entries' in search_result and len(search_result['entries']) > 0:
-                # Lọc ra các bài chưa từng phát trong phiên này
                 unplayed_tracks = [
                     t for t in search_result['entries'] 
                     if t.get('webpage_url') not in played_history and t.get('url') not in played_history
                 ]
                 
-                # Nếu tất cả đã phát rồi thì chọn đại trong danh sách tìm kiếm
                 candidates = unplayed_tracks if unplayed_tracks else search_result['entries']
                 selected_track = random.choice(candidates)
                 
@@ -398,7 +391,6 @@ async def play_next(ctx):
             title = data.get('title', 'Bài hát SoundCloud')
             webpage_url = data.get('webpage_url', next_song['query'])
             
-            # Ghi nhớ bài này đã phát
             played_history.add(webpage_url)
             last_title = title
 
@@ -410,6 +402,7 @@ async def play_next(ctx):
             def after_playing(error):
                 if error:
                     print(f"Lỗi audio: {error}")
+                # Tự động chuyển bài tiếp theo, không bao giờ disconnect
                 asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
 
             ctx.voice_client.play(source, after=after_playing)
@@ -419,7 +412,8 @@ async def play_next(ctx):
             print(f"Lỗi tải bài: {e}")
             await play_next(ctx)
     else:
-        await ctx.send("✅ Không tìm thấy thêm nhạc gợi ý. Bot dừng phát!")
+        # Nếu không tìm thấy nhạc, bot vẫn ở lại phòng chứ KHÔNG out
+        await ctx.send("⏸️ Đã hết bài hát. Bot đang treo trong phòng đợi lệnh mới!")
 
 @bot.command(name='play')
 async def play(ctx, *, query: str):
@@ -429,8 +423,9 @@ async def play(ctx, *, query: str):
     channel = ctx.author.voice.channel
 
     try:
+        # Tự động kết nối hoặc di chuyển tới kênh hiện tại
         if ctx.voice_client is None:
-            await channel.connect()
+            await channel.connect(reconnect=True, timeout=60.0)
         elif ctx.voice_client.channel != channel:
             await ctx.voice_client.move_to(channel)
     except Exception as e:
@@ -456,13 +451,25 @@ async def skip(ctx):
 
 @bot.command(name='stop')
 async def stop(ctx):
+    """Lệnh dừng nhạc và xóa danh sách nhưng BOT VẪN Ở LẠI VOICECALL"""
+    global song_queue, last_title
+    song_queue.clear()
+    played_history.clear()
+    last_title = None
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+    await ctx.send("🛑 Đã xóa danh sách phát. Bot vẫn ở lại kênh thoại!")
+
+@bot.command(name='leave')
+async def leave(ctx):
+    """Chỉ khi dùng lệnh này bot mới rời kênh thoại"""
     global song_queue, last_title
     song_queue.clear()
     played_history.clear()
     last_title = None
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
-        await ctx.send("🛑 Đã dừng phát nhạc và rời kênh!")
+        await ctx.send("👋 Đã rời kênh thoại!")
     else:
         await ctx.send("Bot chưa vào kênh thoại nào.")
 # ==============================================================================
